@@ -2,7 +2,7 @@
 import os
 import pandas as pd
 import yfinance as yf
-from Config import SYMBOL, INTERVAL, START, END
+from src.Config import SYMBOL, INTERVAL, START, END
 
 def main():
     os.makedirs("data/raw", exist_ok=True)
