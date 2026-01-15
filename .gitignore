@@ -1,0 +1,38 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Trained models (should be regenerated)
+Model/*.pkl
+Model/*.json
+
+# Processed data (can be regenerated from raw data)
+data/processed/*.csv
+
+# Optional: Raw data (uncomment if you don't want to include sample data)
+# data/raw/*.csv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Virtual environment (if using)
+venv/
+env/
+ENV/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs
+*.log

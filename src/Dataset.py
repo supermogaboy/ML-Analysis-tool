@@ -1,7 +1,7 @@
 # src/dataset.py
 import numpy as np
 import pandas as pd
-from Config import HORIZON_DAYS, FLAT_BAND
+from src.Config import HORIZON_DAYS, FLAT_BAND
 
 def make_targets(df: pd.DataFrame) -> pd.DataFrame:
     """

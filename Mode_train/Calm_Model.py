@@ -44,6 +44,7 @@ position sizing modules.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Dict, Tuple
@@ -61,7 +62,15 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from Config import HORIZON_DAYS, FLAT_BAND, RANDOM_SEED
+import sys
+import os
+
+# Add project root to path for imports
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src.Config import HORIZON_DAYS, FLAT_BAND, RANDOM_SEED
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +104,9 @@ class CalmRegimeConfig:
 
     horizon_days: int = HORIZON_DAYS
     flat_band: float = FLAT_BAND
-    vol_quantile: float = 0.4
-    dd_quantile: float = 0.4
-    min_calm_samples: int = 500
+    vol_quantile: float = 0.3  # Stricter: only bottom 30% of volatility qualifies as calm
+    dd_quantile: float = 0.5   # Stricter: only top 50% of drawdown (less negative/more calm)
+    min_calm_samples: int = 50  # Minimum for training (will be higher for larger, less volatile datasets)
     test_size_fraction: float = 0.2
     random_state: int = RANDOM_SEED
 
@@ -109,16 +118,14 @@ class CalmRegimeConfig:
 
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Compute interpretable, leakage‑free features from daily QQQ data.
+    Extract and map features from processed data to model expected format.
 
-    Expected input columns
-    ----------------------
-    - 'date'
-    - 'adj_close'
-    - 'close'
-
-    Additional OHLCV columns (open, high, low, volume) are ignored here but
-    preserved in the original DataFrame if needed elsewhere.
+    Expected input columns (from processed CSV)
+    -------------------------------------------
+    - 'date', 'adj_close', 'close'
+    - 'logret_1', 'logret_5', 'logret_10'
+    - 'vol_10', 'rsi_14', 'bb_z_20'
+    - 'trend_20_50', 'ema_20', 'ema_50'
     """
     # Ensure sorted by time
     df = df.sort_values("date").reset_index(drop=True)
@@ -126,39 +133,48 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     price = df["adj_close"].astype(float)
     close = df["close"].astype(float)
 
-    # 1d log return
-    log_ret_1d = np.log(price / price.shift(1))
+    # Map processed data features to model expected names
+    # Use existing features from processed data where available
+    log_ret_1d = df["logret_1"] if "logret_1" in df.columns else np.log(price / price.shift(1))
+    log_ret_5d = df["logret_5"] if "logret_5" in df.columns else log_ret_1d.rolling(window=5).sum()
+    log_ret_10d = df["logret_10"] if "logret_10" in df.columns else log_ret_1d.rolling(window=10).sum()
+    
+    # 10-day realized volatility
+    vol_10d = df["vol_10"] if "vol_10" in df.columns else log_ret_1d.rolling(window=10).std()
+    
+    # RSI(14) - use existing if available
+    if "rsi_14" in df.columns:
+        rsi_14 = df["rsi_14"]
+    else:
+        delta = close.diff()
+        gain = delta.clip(lower=0.0)
+        loss = -delta.clip(upper=0.0)
+        roll_period = 14
+        avg_gain = gain.ewm(alpha=1.0 / roll_period, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1.0 / roll_period, adjust=False).mean()
+        rs = avg_gain / (avg_loss.replace(0.0, np.nan))
+        rsi_14 = 100.0 - (100.0 / (1.0 + rs))
 
-    # 5d and 10d log returns (sums of 1d log returns)
-    log_ret_5d = log_ret_1d.rolling(window=5).sum()
-    log_ret_10d = log_ret_1d.rolling(window=10).sum()
-
-    # 10‑day realized volatility of 1d log returns
-    vol_10d = log_ret_1d.rolling(window=10).std()
-
-    # RSI(14) on close
-    delta = close.diff()
-    gain = delta.clip(lower=0.0)
-    loss = -delta.clip(upper=0.0)
-    # Wilder's smoothing
-    roll_period = 14
-    avg_gain = gain.ewm(alpha=1.0 / roll_period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1.0 / roll_period, adjust=False).mean()
-    rs = avg_gain / (avg_loss.replace(0.0, np.nan))
-    rsi_14 = 100.0 - (100.0 / (1.0 + rs))
-
-    # Bollinger Band Z‑score (20‑day) on close
-    bb_window = 20
-    ma_20 = close.rolling(window=bb_window).mean()
-    std_20 = close.rolling(window=bb_window).std()
-    bb_z = (close - ma_20) / std_20
+    # Bollinger Band Z-score - use existing if available
+    if "bb_z_20" in df.columns:
+        bb_z = df["bb_z_20"]
+    else:
+        bb_window = 20
+        ma_20 = close.rolling(window=bb_window).mean()
+        std_20 = close.rolling(window=bb_window).std()
+        bb_z = (close - ma_20) / std_20
 
     # Trend proxy: (EMA20 − EMA50) / close
-    ema_20 = close.ewm(span=20, adjust=False).mean()
-    ema_50 = close.ewm(span=50, adjust=False).mean()
-    trend_short = (ema_20 - ema_50) / close
+    if "trend_20_50" in df.columns:
+        trend_short = df["trend_20_50"]
+    elif "ema_20" in df.columns and "ema_50" in df.columns:
+        trend_short = (df["ema_20"] - df["ema_50"]) / close
+    else:
+        ema_20 = close.ewm(span=20, adjust=False).mean()
+        ema_50 = close.ewm(span=50, adjust=False).mean()
+        trend_short = (ema_20 - ema_50) / close
 
-    # 21‑day drawdown: price / rolling_max(21) − 1
+    # 21-day drawdown: price / rolling_max(21) − 1
     roll_max_21 = price.rolling(window=21).max()
     drawdown_21 = price / roll_max_21 - 1.0
 
@@ -191,16 +207,16 @@ def compute_labels(
     flat_band: float,
 ) -> pd.DataFrame:
     """
-    Compute forward returns and classification / regression targets.
+    Extract or compute forward returns and classification / regression targets.
 
     Parameters
     ----------
     df : DataFrame
-        Must contain 'date' and 'adj_close' columns.
+        Processed data with 'date', 'adj_close', and optionally 'fwd_ret', 'y_class', 'U', 'D'.
     horizon_days : int
-        Forward horizon in trading days.
+        Forward horizon in trading days (used if labels not in processed data).
     flat_band : float
-        Band for classifying "flat" in terms of log‑returns.
+        Band for classifying "flat" in terms of log‑returns (used if labels not in processed data).
 
     Returns
     -------
@@ -215,22 +231,43 @@ def compute_labels(
     df = df.sort_values("date").reset_index(drop=True)
     price = df["adj_close"].astype(float)
 
-    fwd_price = price.shift(-horizon_days)
-    forward_return = np.log(fwd_price / price)
+    # Use existing labels from processed data if available
+    if "fwd_ret" in df.columns and "y_class" in df.columns and "U" in df.columns and "D" in df.columns:
+        # Convert fwd_ret (simple return) to log return
+        # Handle NaN values properly
+        fwd_ret_clean = df["fwd_ret"].fillna(0.0)
+        forward_return = np.log(1 + fwd_ret_clean)
+        forward_return = forward_return.replace([np.inf, -np.inf], np.nan)
+        
+        # Use existing y_class (0=down, 1=flat, 2=up) but ensure it's float
+        class_label = df["y_class"].astype(float)
+        
+        # Convert U and D from simple return to log return
+        # U and D in processed data are simple returns, convert to log returns
+        U_clean = df["U"].fillna(0.0).clip(lower=0.0)
+        D_clean = df["D"].fillna(0.0).clip(lower=0.0)
+        upside = np.log(1 + U_clean)
+        downside = np.log(1 + D_clean)
+        upside = upside.replace([np.inf, -np.inf], np.nan)
+        downside = downside.replace([np.inf, -np.inf], np.nan)
+    else:
+        # Compute labels from scratch if not in processed data
+        fwd_price = price.shift(-horizon_days)
+        forward_return = np.log(fwd_price / price)
 
-    # Classification labels
-    down_mask = forward_return < -flat_band
-    up_mask = forward_return > flat_band
-    flat_mask = (~down_mask) & (~up_mask)
+        # Classification labels
+        down_mask = forward_return < -flat_band
+        up_mask = forward_return > flat_band
+        flat_mask = (~down_mask) & (~up_mask)
 
-    class_label = pd.Series(np.nan, index=df.index, dtype=float)
-    class_label[down_mask] = 0.0
-    class_label[flat_mask] = 1.0
-    class_label[up_mask] = 2.0
+        class_label = pd.Series(np.nan, index=df.index, dtype=float)
+        class_label[down_mask] = 0.0
+        class_label[flat_mask] = 1.0
+        class_label[up_mask] = 2.0
 
-    # Magnitude labels
-    upside = forward_return.clip(lower=0.0)
-    downside = (-forward_return).clip(lower=0.0)
+        # Magnitude labels
+        upside = forward_return.clip(lower=0.0)
+        downside = (-forward_return).clip(lower=0.0)
 
     labels = pd.DataFrame(
         {
@@ -400,11 +437,10 @@ def build_directional_pipeline(
     Build the multinomial logistic regression pipeline.
     """
     clf = LogisticRegression(
-        multi_class="multinomial",
         solver="lbfgs",
         C=0.5,  # strong L2 regularization for stability
         max_iter=1000,
-        n_jobs=None,
+        random_state=random_state,
     )
 
     pipe = Pipeline(
@@ -540,7 +576,8 @@ def save_calm_models(
         "feature_names": list(feature_names),
         "metrics": metrics,
     }
-    pd.Series(metadata).to_json(metadata_path)
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -550,21 +587,27 @@ def save_calm_models(
 
 def load_qqq_daily_csv(path: str) -> pd.DataFrame:
     """
-    Load QQQ daily CSV as produced by MakeCSV.py.
+    Load processed QQQ daily CSV.
 
-    Expected columns (case‑sensitive):
-    - date, adj_close, close, high, low, open, volume
+    Expected columns (from processed pipeline):
+    - date, adj_close, close, and processed features (logret_1, vol_10, rsi_14, etc.)
+    - Optional: fwd_ret, y_class, U, D, regime
     """
     df = pd.read_csv(path)
     # Normalise column names to lower snake_case if needed
     df.columns = [c.lower() for c in df.columns]
     if "date" not in df.columns:
         raise ValueError("Input CSV must contain a 'date' column.")
+    
+    # Ensure date is datetime
+    if df["date"].dtype == "object":
+        df["date"] = pd.to_datetime(df["date"])
+    
     return df
 
 
 def train_calm_regime_specialist(
-    csv_path: str = "data/raw/QQQ_1d.csv",
+    csv_path: str = "data/processed/QQQ_1d_processed.csv",
     output_dir: str = "Model",
     config: CalmRegimeConfig | None = None,
 ) -> Dict[str, float]:
@@ -573,9 +616,9 @@ def train_calm_regime_specialist(
 
     Steps
     -----
-    1. Load daily QQQ CSV.
-    2. Compute interpretable features.
-    3. Build labels with horizon and flat band from Config.
+    1. Load processed QQQ CSV (with features and labels).
+    2. Extract/map features from processed data.
+    3. Extract/compute labels from processed data.
     4. Filter to calm regime observations only.
     5. Train:
         - multinomial logistic regression for direction
@@ -621,9 +664,27 @@ def train_calm_regime_specialist(
 
 if __name__ == "__main__":
     # Simple CLI entry point for training the Calm specialist.
-    metrics_out = train_calm_regime_specialist()
-    print("Calm Regime specialist trained.")
+    # Ensure we're in the project root for relative paths
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    os.chdir(project_root)
+    
+    # Default path to processed data
+    processed_csv = os.path.join(project_root, "data", "processed", "QQQ_1d_processed.csv")
+    
+    if not os.path.exists(processed_csv):
+        print(f"Error: Processed data not found at {processed_csv}")
+        print("Please run the data pipeline first:")
+        print("  python src/run_data_pipeline.py")
+        sys.exit(1)
+    
+    print(f"Loading processed data from: {processed_csv}")
+    metrics_out = train_calm_regime_specialist(csv_path=processed_csv)
+    print("\n" + "="*60)
+    print("Calm Regime specialist trained successfully!")
+    print("="*60)
     print("Hold‑out calm metrics:")
     for k, v in metrics_out.items():
         print(f"  {k}: {v}")
+    print("="*60)
 

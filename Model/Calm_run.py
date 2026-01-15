@@ -147,7 +147,8 @@ def score_calm_specialist_on_dataframe(
     # Base output DataFrame with calm flag; NaN calm where features invalid
     out = pd.DataFrame(index=feature_frame.index)
     out["calm"] = False
-    out.loc[calm_mask.index, "calm"] = calm_mask.values
+    # Convert calm_mask values to bool explicitly to avoid dtype warning
+    out.loc[calm_mask.index, "calm"] = calm_mask.values.astype(bool)
 
     # Initialise prediction columns as NaN
     for col in ["p_down", "p_flat", "p_up", "exp_upside", "exp_downside"]:
@@ -184,18 +185,21 @@ def score_calm_specialist_on_dataframe(
 
 
 def score_calm_specialist(
-    csv_path: str = "data/raw/QQQ_1d.csv",
+    csv_path: str = "data/processed/QQQ_1d_processed.csv",
     model_dir: str = "Model",
     config: CalmRegimeConfig | None = None,
 ) -> Dict[str, float]:
     """
     Convenience wrapper:
-    - loads latest QQQ CSV
+    - loads processed QQQ CSV (with features already computed)
     - loads Calm specialist models
     - scores all eligible dates
 
     Returns a single dictionary for the **most recent date** the model can
     score (i.e. where features + forward horizon are fully defined).
+    
+    Note: Uses processed data by default. If you need to score raw data,
+    use score_calm_specialist_on_dataframe() directly with a raw DataFrame.
     """
     if config is None:
         config = CalmRegimeConfig()
@@ -230,9 +234,27 @@ def score_calm_specialist(
 
 if __name__ == "__main__":
     # Example CLI usage
-    res = score_calm_specialist()
-    print("Latest Calm specialist scores:")
+    import os
+    
+    # Default to processed data, fallback to raw if processed doesn't exist
+    processed_path = "data/processed/QQQ_1d_processed.csv"
+    raw_path = "data/raw/QQQ_1d.csv"
+    
+    if os.path.exists(processed_path):
+        csv_path = processed_path
+        print(f"Using processed data: {csv_path}")
+    elif os.path.exists(raw_path):
+        csv_path = raw_path
+        print(f"Using raw data: {csv_path}")
+        print("Note: Features will be computed on-the-fly. Consider running data pipeline first.")
+    else:
+        raise FileNotFoundError(
+            f"Neither processed data ({processed_path}) nor raw data ({raw_path}) found.\n"
+            "Please run: python src/run_data_pipeline.py"
+        )
+    
+    res = score_calm_specialist(csv_path=csv_path)
+    print("\nLatest Calm specialist scores:")
     for k, v in res.items():
         print(f"  {k}: {v}")
 
-co
