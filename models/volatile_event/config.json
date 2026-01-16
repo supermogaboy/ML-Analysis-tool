@@ -1,0 +1,6 @@
+{
+  "regime": "volatile_event",
+  "horizon_days": 5,
+  "training_date": "2026-01-16T12:35:07.611152",
+  "random_seed": 42
+}

@@ -1,66 +1,111 @@
-# src/features.py
-import numpy as np
 import pandas as pd
+import numpy as np
 
-def rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    delta = close.diff()
-    up = delta.clip(lower=0)
-    down = (-delta).clip(lower=0)
-    ma_up = up.ewm(alpha=1/period, adjust=False).mean()
-    ma_down = down.ewm(alpha=1/period, adjust=False).mean()
-    rs = ma_up / (ma_down + 1e-12)
-    return 100 - (100 / (1 + rs))
+def calculate_returns(df, price_col='close'):
+    """Calculate log returns for various horizons"""
+    df[f'logret_1'] = np.log(df[price_col] / df[price_col].shift(1))
+    df[f'logret_5'] = np.log(df[price_col] / df[price_col].shift(5))
+    df[f'logret_10'] = np.log(df[price_col] / df[price_col].shift(10))
+    return df
 
-def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    high, low, close = df["high"], df["low"], df["close"]
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        (high - low),
-        (high - prev_close).abs(),
-        (low - prev_close).abs()
-    ], axis=1).max(axis=1)
-    return tr.ewm(alpha=1/period, adjust=False).mean()
+def calculate_volatility(df, price_col='close'):
+    """Calculate rolling volatility measures"""
+    # Rolling standard deviation of returns
+    df['vol_10'] = df['logret_1'].rolling(10).std()
+    df['vol_20'] = df['logret_1'].rolling(20).std()
+    
+    # Volatility SMA and standard deviation
+    df['vol_sma20'] = df['vol_20'].rolling(20).mean()
+    df['vol_std20'] = df['vol_20'].rolling(20).std()
+    df['vol_z20'] = (df['vol_20'] - df['vol_sma20']) / df['vol_std20']
+    
+    return df
 
-def bollinger_z(close: pd.Series, period: int = 20) -> pd.Series:
-    sma = close.rolling(period).mean()
-    std = close.rolling(period).std()
-    return (close - sma) / (2 * (std + 1e-12))
+def calculate_moving_averages(df, price_col='close'):
+    """Calculate exponential moving averages"""
+    df['ema_20'] = df[price_col].ewm(span=20).mean()
+    df['ema_50'] = df[price_col].ewm(span=50).mean()
+    df['ema_200'] = df[price_col].ewm(span=200).mean()
+    
+    # Trend indicators
+    df['trend_20_50'] = (df['ema_20'] - df['ema_50']) / df['ema_50']
+    df['trend_px_200'] = (df[price_col] - df['ema_200']) / df['ema_200']
+    
+    return df
 
-def max_drawdown(close: pd.Series, window: int = 63) -> pd.Series:
-    roll_max = close.rolling(window).max()
-    dd = (close / (roll_max + 1e-12)) - 1.0
-    return dd
+def calculate_rsi(df, price_col='close', periods=14):
+    """Calculate RSI"""
+    delta = df[price_col].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+    rs = gain / loss
+    df['rsi_14'] = 100 - (100 / (1 + rs))
+    return df
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    c = df["close"]
+def calculate_bollinger_bands(df, price_col='close', periods=20, std_dev=2):
+    """Calculate Bollinger Bands and Z-score"""
+    sma = df[price_col].rolling(periods).mean()
+    std = df[price_col].rolling(periods).std()
+    
+    upper_band = sma + (std * std_dev)
+    lower_band = sma - (std * std_dev)
+    
+    df['bb_z_20'] = (df[price_col] - sma) / std
+    return df
 
-    df["logret_1"] = np.log(c).diff()
-    df["logret_5"] = np.log(c).diff(5)
-    df["logret_10"] = np.log(c).diff(10)
+def calculate_atr(df, periods=14):
+    """Calculate Average True Range and ATR percentage"""
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    
+    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr_14'] = true_range.rolling(periods).mean()
+    df['atrp_14'] = df['atr_14'] / df['close']
+    
+    return df
 
-    df["vol_10"] = df["logret_1"].rolling(10).std()
-    df["vol_20"] = df["logret_1"].rolling(20).std()
+def calculate_drawdown(df, price_col='close', window=63):
+    """Calculate drawdown from recent highs"""
+    rolling_max = df[price_col].rolling(window=window).max()
+    df['dd_63'] = (df[price_col] - rolling_max) / rolling_max
+    return df
 
-    df["ema_20"] = c.ewm(span=20, adjust=False).mean()
-    df["ema_50"] = c.ewm(span=50, adjust=False).mean()
-    df["ema_200"] = c.ewm(span=200, adjust=False).mean()
+def calculate_distance_from_high(df, price_col='close', window=252):
+    """Calculate distance from 52-week high"""
+    rolling_max = df[price_col].rolling(window=window).max()
+    df['dist_252_high'] = (df[price_col] - rolling_max) / rolling_max
+    return df
 
-    df["trend_20_50"] = (df["ema_20"] - df["ema_50"]) / (c + 1e-12)
-    df["trend_px_200"] = (c - df["ema_200"]) / (c + 1e-12)
+def calculate_forward_returns(df, price_col='close', horizon=5):
+    """Calculate forward returns for target variable"""
+    df['fwd_ret'] = np.log(df[price_col].shift(-horizon) / df[price_col])
+    return df
 
-    df["rsi_14"] = rsi(c, 14)
-    df["bb_z_20"] = bollinger_z(c, 20)
+def create_features(df, price_col='close'):
+    """Create all technical features"""
+    df = calculate_returns(df, price_col)
+    df = calculate_volatility(df, price_col)
+    df = calculate_moving_averages(df, price_col)
+    df = calculate_rsi(df, price_col)
+    df = calculate_bollinger_bands(df, price_col)
+    df = calculate_atr(df)
+    df = calculate_drawdown(df, price_col)
+    df = calculate_distance_from_high(df, price_col)
+    df = calculate_forward_returns(df, price_col)
+    
+    return df
 
-    df["atr_14"] = atr(df, 14)
-    df["atrp_14"] = df["atr_14"] / (c + 1e-12)
-
-    vol = df["volume"].replace(0, np.nan)
-    df["vol_sma20"] = vol.rolling(20).mean()
-    df["vol_std20"] = vol.rolling(20).std()
-    df["vol_z20"] = (vol - df["vol_sma20"]) / (df["vol_std20"] + 1e-12)
-
-    df["dd_63"] = max_drawdown(c, 63)
-    df["dist_252_high"] = (c / (c.rolling(252).max() + 1e-12)) - 1.0
-
+def create_labels(df, flat_band=0.001):
+    """Create classification labels"""
+    df['y_class'] = 0  # Default to neutral/flat
+    
+    # Up moves
+    df.loc[df['fwd_ret'] > flat_band, 'y_class'] = 2
+    df['U'] = (df['fwd_ret'] > flat_band).astype(float)
+    
+    # Down moves  
+    df.loc[df['fwd_ret'] < -flat_band, 'y_class'] = 1
+    df['D'] = (df['fwd_ret'] < -flat_band).astype(float)
+    
     return df
