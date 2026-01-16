@@ -48,6 +48,22 @@ date,adj_close,close,high,low,open,volume,logret_1,vol_10,ema_20,rsi_14,regime,f
 
 ## Usage
 
+### Data Processing
+```bash
+# Process raw data into features and labels
+python run_data_pipeline.py
+```
+
+This will:
+- Download QQQ data from yfinance (or use existing data/raw/QQQ_1d.csv)
+- Create technical indicators and features
+- **Train RegimeClassifier using Gaussian Mixture Models** for regime detection
+- Detect market regimes (trend_risk, calm, crisis, volatile_event)
+- Generate forward returns and labels
+- Save to data/processed/QQQ_1d_processed.csv
+
+**Regime Detection**: Uses unsupervised Gaussian Mixture Models to identify 4 market regimes based on volatility, trend, drawdown, and Sharpe ratio characteristics. The classifier is trained automatically and saved to `models/regime_classifier.pkl`.
+
 ### Training
 ```bash
 python train_regime_models.py
@@ -56,7 +72,7 @@ python train_regime_models.py
 **Outputs:**
 ```
 models/
-├── trend/
+├── trend_risk/
 │   ├── model_up_clf.pkl      # Up confidence model
 │   ├── model_up_reg.pkl      # Up magnitude model  
 │   ├── model_down_clf.pkl    # Down confidence model
@@ -64,10 +80,10 @@ models/
 │   ├── feature_list.json     # Feature names/order
 │   ├── config.json           # Training metadata
 │   └── metrics.json          # Performance metrics
-├── chop/
+├── volatile_event/
 ├── calm/
-└── crisis/
-```
+├── crisis/
+└── chop/
 
 ### Inference
 ```python
@@ -77,20 +93,34 @@ import pandas as pd
 # Load your feature data (single row)
 X_row = pd.DataFrame({
     'adj_close': [100.0],
-    'close': [100.0],
-    'high': [105.0], 
+    'close': [100.0], 
+    'high': [105.0],
     'low': [95.0],
     'open': [98.0],
     'volume': [1000000],
     'logret_1': [0.01],
-    'vol_10': [0.02],
+    'logret_5': [0.02],
+    'logret_10': [0.03],
+    'vol_10': [0.015],
+    'vol_20': [0.018],
     'ema_20': [99.0],
     'ema_50': [98.0],
-    'rsi_14': [55.0]
+    'ema_200': [97.0],
+    'trend_20_50': [0.01],
+    'trend_px_200': [0.03],
+    'rsi_14': [55.0],
+    'bb_z_20': [0.5],
+    'atr_14': [2.0],
+    'atrp_14': [0.02],
+    'vol_sma20': [0.017],
+    'vol_std20': [0.005],
+    'vol_z20': [0.3],
+    'dd_63': [0.05],
+    'dist_252_high': [0.1]
 })
 
 # Get predictions for a regime
-result = predict_regime("trend", X_row)
+result = predict_regime("trend_risk", X_row)
 print(result)
 ```
 
@@ -150,19 +180,46 @@ pip install pandas numpy scikit-learn joblib
 - **Handling insufficient data**: Creates dummy models if <10 samples
 - **Metrics**: AUC for confidence models, MAE/RMSE for magnitude models
 
+### Hackathon Demo
+```bash
+# Complete pipeline demonstration for judges
+python demo.py
+```
+
+**Demo shows:**
+- Dataset overview and regime distribution
+- Model performance metrics across all regimes
+- Live inference with realistic market data
+- Performance comparison and feature importance
+- Complete end-to-end pipeline validation
+
 ## File Structure
 ```
-├── train_regime_models.py    # Training script
-├── infer.py                  # Inference module
-├── README.md                 # This file
+├── demo.py                   # Hackathon demo script
+├── run_data_pipeline.py         # Data processing script
+├── train_regime_models.py      # Training script
+├── infer.py                   # Inference module
+├── README.md                  # This file
+├── requirements_minimal.txt     # Minimal dependencies
+├── src/                       # Data processing modules
+│   ├── Features.py            # Technical indicator calculations
+│   ├── Regimes.py            # Regime detection logic (integrates RegimeClassifier)
+│   ├── Dataset.py            # Data loading/processing utilities
+│   └── Config.py            # Configuration settings
+├── classifier/               # Regime classifier module
+│   └── RegimeClassifier.py   # Gaussian Mixture Model regime detection
 ├── data/
-│   └── processed/
-│       └── QQQ_1d_processed.csv  # Input data
+│   ├── raw/                   # Raw OHLCV data
+│   │   └── QQQ_1d.csv
+│   └── processed/             # Features and labels
+│       └── QQQ_1d_processed.csv
 └── models/                   # Trained models (created after training)
-    ├── trend/
-    ├── chop/
+    ├── regime_classifier.pkl  # Trained regime classifier
+    ├── trend_risk/
+    ├── volatile_event/
     ├── calm/
-    └── crisis/
+    ├── crisis/
+    └── chop/
 ```
 
 ## Notes

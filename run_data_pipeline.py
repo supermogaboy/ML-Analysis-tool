@@ -57,7 +57,8 @@ def main():
     processed_df = process_data(
         raw_df, 
         horizon_days=HORIZON_DAYS, 
-        flat_band=FLAT_BAND
+        flat_band=FLAT_BAND,
+        use_regime_classifier=True  # Use the RegimeClassifier
     )
     
     # Step 3: Validate processed data

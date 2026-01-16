@@ -15,7 +15,7 @@ def load_raw_data(symbol="QQQ", start_date="2000-01-01", end_date="2024-01-01"):
         print(f"Error loading data: {e}")
         return None
 
-def process_data(df, horizon_days=5, flat_band=0.001):
+def process_data(df, horizon_days=5, flat_band=0.001, use_regime_classifier=True):
     """
     Process raw OHLCV data into features and labels
     
@@ -23,6 +23,7 @@ def process_data(df, horizon_days=5, flat_band=0.001):
         df: Raw OHLCV DataFrame
         horizon_days: Forward return horizon for labels
         flat_band: Threshold for flat classification
+        use_regime_classifier: Whether to use RegimeClassifier (recommended)
     
     Returns:
         Processed DataFrame with features and labels
@@ -33,8 +34,9 @@ def process_data(df, horizon_days=5, flat_band=0.001):
     # Create classification labels
     df = create_labels(df, flat_band)
     
-    # Detect market regimes
-    df = detect_regimes(df)
+    # Detect market regimes using classifier
+    df = detect_regimes(df, use_classifier=use_regime_classifier, 
+                       model_path="models/regime_classifier.pkl")
     
     # Remove rows with NaN values (from rolling calculations)
     df = df.dropna()

@@ -31,16 +31,19 @@ class RegimeClassifier:
     def make_features(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
 
-        d["ret"] = d["Adj Close"].pct_change()
+        # Use 'close' if 'Adj Close' not available
+        price_col = 'Adj Close' if 'Adj Close' in d.columns else 'close'
+        
+        d["ret"] = d[price_col].pct_change()
         d["vol_21"] = d["ret"].rolling(21).std()
         d["vol_63"] = d["ret"].rolling(63).std()
 
         d["trend_63"] = (
-            d["Adj Close"] / d["Adj Close"].rolling(63).mean() - 1
+            d[price_col] / d[price_col].rolling(63).mean() - 1
         )
 
         d["drawdown"] = (
-            d["Adj Close"] / d["Adj Close"].cummax() - 1
+            d[price_col] / d[price_col].cummax() - 1
         )
 
         d["sharpe_63"] = (
