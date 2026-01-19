@@ -4,49 +4,20 @@ import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import GradientBoostingRegressor
+from config_loader import load_config, get_paths, get_features, get_training_params
 
 # =========================================================
-# USER CONTROLS
+# LOAD CONFIGURATION
 # =========================================================
 
-DATA_PATH = "qqq_features_with_regime.csv"
-MODEL_OUT = "regime_conditional_models.pkl"
+config = load_config()
+paths = get_paths()
+features = get_features()
+training_params = get_training_params()
 
-# ---------------------------------
-# PER-REGIME TRAINING WINDOWS
-# ---------------------------------
-REGIME_TRAIN_WINDOWS = {
-    "calm": {
-        "start": "2000-01-01",
-        "end":   "2024-12-31"
-    },
-    "trend_risk": {
-        "start": "2000-01-01",
-        "end":   "2024-12-31"
-    },
-    "volatile_event": {
-        "start": "2000-01-01",
-        "end":   "2024-12-31"
-    },
-    "crisis": {
-        "start": "2000-01-01",
-        "end":   "2024-12-31"
-    }
-}
-
-# =========================================================
-# FEATURE SELECTION (NO LEAKAGE)
-# =========================================================
-
-FEATURES = [
-    "logret_1", "logret_5", "logret_10",
-    "vol_10", "vol_20", "vol_z20",
-    "ema_20", "ema_50", "ema_200",
-    "trend_20_50", "trend_px_200",
-    "rsi_14", "bb_z_20",
-    "atr_14", "atrp_14",
-    "dd_63", "dist_252_high"
-]
+DATA_PATH = f"{paths['processed_dir']}/QQQ_hmm_enhanced.csv"
+MODEL_OUT = paths["regime_models"]
+REGIME_TRAIN_WINDOWS = training_params["train_windows"]
 
 # =========================================================
 # LOAD DATA
@@ -55,7 +26,7 @@ FEATURES = [
 df = pd.read_csv(DATA_PATH, parse_dates=["date"])
 df = df.set_index("date")
 
-required_cols = FEATURES + ["fwd_ret", "regime"]
+required_cols = features + ["fwd_ret", "regime"]
 missing = set(required_cols) - set(df.columns)
 if missing:
     raise ValueError(f"Missing columns: {missing}")
@@ -91,7 +62,7 @@ for regime, window in REGIME_TRAIN_WINDOWS.items():
         continue
 
     # Features
-    X = df_r[FEATURES]
+    X = df_r[features]
 
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X)
@@ -138,7 +109,7 @@ for regime, window in REGIME_TRAIN_WINDOWS.items():
         "p_down": p_down_model,
         "ret_up": ret_up_model,
         "ret_down": ret_down_model,
-        "features": FEATURES
+        "features": features
     }
 
     print(f"  Trained on {len(df_r)} samples")

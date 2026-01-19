@@ -1,0 +1,40 @@
+{
+    "data": {
+        "raw_dir": "data/raw",
+        "processed_dir": "data/processed",
+        "symbol": "QQQ",
+        "start_date": "2000-01-01",
+        "end_date": "2025-12-31"
+    },
+    "models": {
+        "models_dir": "models",
+        "hmm_model": "models/hmm_regime_classifier.pkl",
+        "regime_models": "regime_conditional_models.pkl"
+    },
+    "training": {
+        "horizon_days": 5,
+        "flat_band": 0.001,
+        "random_seed": 42,
+        "hmm_regimes": 4,
+        "train_windows": {
+            "calm": {"start": "2000-01-01", "end": "2024-06-30"},
+            "trend_risk": {"start": "2000-01-01", "end": "2024-06-30"},
+            "volatile_event": {"start": "2000-01-01", "end": "2024-06-30"},
+            "crisis": {"start": "2000-01-01", "end": "2024-06-30"}
+        }
+    },
+    "testing": {
+        "test_start": "2024-01-01",
+        "test_end": "2025-12-31",
+        "prob_threshold": 0.5
+    },
+    "features": [
+        "logret_1", "logret_5", "logret_10",
+        "vol_10", "vol_20", "vol_z20",
+        "ema_20", "ema_50", "ema_200",
+        "trend_20_50", "trend_px_200",
+        "rsi_14", "bb_z_20",
+        "atr_14", "atrp_14",
+        "dd_63", "dist_252_high"
+    ]
+}

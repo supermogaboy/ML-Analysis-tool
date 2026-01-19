@@ -1,6 +1,0 @@
-{
-  "regime": "trend_risk",
-  "horizon_days": 5,
-  "training_date": "2026-01-16T13:20:21.696122",
-  "random_seed": 42
-}

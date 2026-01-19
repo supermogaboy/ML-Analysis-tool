@@ -63,3 +63,5 @@ websockets==16.0
 xgboost==2.1.4
 yfinance==1.0
 ibm-watsonx-ai
+hmmlearn
+ta
